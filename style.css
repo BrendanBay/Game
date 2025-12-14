@@ -1,0 +1,27 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden; /* no scrollbars for the game screen */
+  background: linear-gradient(#021b3a, #044f7a); /* winter night sky */
+  font-family: system-ui, sans-serif;
+}
+
+body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#gameCanvas {
+  width: 100vw;     /* fill screen width on mobile */
+  height: 70vh;     /* leave some room if you add UI later */
+  max-width: 600px; /* don’t get too huge on desktop */
+  border: 2px solid #fff;
+  background: transparent;
+}
