@@ -218,7 +218,7 @@ function getCurrentSpawnInterval() {
 const particles = [];
 
 function spawnBurst(x, y, color) {
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < 3; i++) {
     const angle = Math.random() * Math.PI * 2;
     const speed = 1 + Math.random() * 2;
     particles.push({
