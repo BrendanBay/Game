@@ -15,12 +15,18 @@ const sounds = {
   hit: new Audio('hit.mp3'),
   gameover: new Audio('gameover.mp3')
 };
+
 let audioUnlocked = false;
 let hasStarted = false;
+
+// --- Screen shake ---
+let shakeTime = 0;
+let shakeIntensity = 0;
 
 // --- Best score (localStorage) ---
 let bestScore = 0;
 const BEST_SCORE_KEY = 'catch_the_gifts_best_score';
+
 const stored = localStorage.getItem(BEST_SCORE_KEY);
 if (stored !== null) {
   const n = Number(stored);
@@ -76,20 +82,25 @@ function loadImages() {
   const santaImg = new Image();
   const giftImg = new Image();
   const charcoalImg = new Image();
+
   let loadedCount = 0;
   const total = 3;
+
   function onLoad() {
     loadedCount++;
     if (loadedCount === total) {
       assetsLoaded = true;
     }
   }
+
   santaImg.onload = onLoad;
   giftImg.onload = onLoad;
   charcoalImg.onload = onLoad;
+
   santaImg.src = 'santa.png';
   giftImg.src = 'gift.png';
   charcoalImg.src = 'charcoal.png';
+
   images.santa = santaImg;
   images.gift = giftImg;
   images.charcoal = charcoalImg;
@@ -101,9 +112,11 @@ const groundFraction = 0.2;
 function resizeCanvas() {
   const rect = canvas.getBoundingClientRect();
   const dpr = window.devicePixelRatio || 1;
+
   canvas.width = rect.width * dpr;
   canvas.height = rect.height * dpr;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
   updateLayout(rect.width, rect.height);
 }
 
@@ -139,33 +152,25 @@ const player = {
   targetX: null
 };
 
-// --- Smooth Keyboard Controls ---
-let keys = { left: false, right: false };
-
+// --- Controls ---
 window.addEventListener('keydown', (e) => {
   if (!hasStarted && (e.key === 'Enter' || e.key === ' ')) {
-    e.preventDefault();
     startGameFromInput();
     return;
   }
-  if (gameOver && e.key === 'Enter') {
+
+  if (e.key === 'ArrowLeft' || e.key === 'a') {
+    player.targetX = player.x - 200;
+  } else if (e.key === 'ArrowRight' || e.key === 'd') {
+    player.targetX = player.x + 200;
+  } else if (e.key === 'Enter' && gameOver) {
     restartGame();
-    return;
-  }
-  if (['ArrowLeft', 'a'].includes(e.key)) {
-    keys.left = true;
-    e.preventDefault();
-  } else if (['ArrowRight', 'd'].includes(e.key)) {
-    keys.right = true;
-    e.preventDefault();
   }
 });
 
 window.addEventListener('keyup', (e) => {
-  if (['ArrowLeft', 'a'].includes(e.key)) {
-    keys.left = false;
-  } else if (['ArrowRight', 'd'].includes(e.key)) {
-    keys.right = false;
+  if (['ArrowLeft', 'ArrowRight', 'a', 'd'].includes(e.key)) {
+    player.targetX = null;
   }
 });
 
@@ -187,10 +192,13 @@ canvas.addEventListener('touchend', () => {
 function handleTouch(e) {
   if (gameOver) return;
   if (!e.touches || e.touches.length === 0) return;
+
   const touch = e.touches[0];
   const rect = canvas.getBoundingClientRect();
   const touchX = touch.clientX - rect.left;
+
   player.targetX = touchX - player.width / 2;
+
   e.preventDefault();
 }
 
@@ -204,6 +212,7 @@ function spawnObject() {
   const y = -size;
   const speed = 2 + Math.random() * 2;
   const type = Math.random() < 0.7 ? 'gift' : 'charcoal';
+
   objects.push({ x, y, width: size, height: size, speed, type });
 }
 
@@ -218,7 +227,7 @@ function getCurrentSpawnInterval() {
 const particles = [];
 
 function spawnBurst(x, y, color) {
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < 12; i++) {
     const angle = Math.random() * Math.PI * 2;
     const speed = 1 + Math.random() * 2;
     particles.push({
@@ -261,34 +270,45 @@ function drawParticles() {
 // --- Objects update ---
 function updateObjects(dt) {
   if (gameOver || !hasStarted) return;
+
   const now = performance.now();
   const currentInterval = getCurrentSpawnInterval();
+
   if (now - lastSpawnTime > currentInterval) {
     spawnObject();
     lastSpawnTime = now;
   }
+
   const rect = canvas.getBoundingClientRect();
+
   for (let i = objects.length - 1; i >= 0; i--) {
     const obj = objects[i];
     obj.y += obj.speed;
+
     if (obj.y > rect.height) {
       objects.splice(i, 1);
       continue;
     }
+
     if (rectsOverlap(player, obj)) {
       const centerX = obj.x + obj.width / 2;
       const centerY = obj.y + obj.height / 2;
+
       if (obj.type === 'gift') {
         score += 1;
+
         if (!goodJobShown && score >= GOOD_JOB_SCORE) {
           goodJobShown = true;
         }
+
         playSound('catch', 0.7);
         spawnBurst(centerX, centerY, { r: 255, g: 215, b: 0 });
       } else {
         lives -= 1;
         playSound('hit', 0.9);
         spawnBurst(centerX, centerY, { r: 80, g: 80, b: 80 });
+        shakeTime = 200;
+        shakeIntensity = 4;
       }
       objects.splice(i, 1);
     }
@@ -299,14 +319,17 @@ function updateObjects(dt) {
 function rectsOverlap(a, b) {
   const shrinkA = 0.2;
   const shrinkB = 0.2;
+
   const ax = a.x + a.width * shrinkA / 2;
   const ay = a.y + a.height * shrinkA / 2;
   const aw = a.width * (1 - shrinkA);
   const ah = a.height * (1 - shrinkA);
+
   const bx = b.x + b.width * shrinkB / 2;
   const by = b.y + b.height * shrinkB / 2;
   const bw = b.width * (1 - shrinkB);
   const bh = b.height * (1 - shrinkB);
+
   return (
     ax < bx + bw &&
     ax + aw > bx &&
@@ -317,10 +340,12 @@ function rectsOverlap(a, b) {
 
 function restartGame() {
   stopSound('gameover');
+
   if (score > bestScore) {
     bestScore = score;
     saveBestScore();
   }
+
   score = 0;
   lives = 3;
   gameOver = false;
@@ -330,6 +355,8 @@ function restartGame() {
   lastSpawnTime = 0;
   difficultyStartTime = performance.now();
   hasStarted = false;
+  shakeTime = 0;
+  shakeIntensity = 0;
   goodJobShown = false;
 }
 
@@ -338,24 +365,18 @@ let lastFrameTime = performance.now();
 
 function update() {
   if (!assetsLoaded) return;
+
   const now = performance.now();
   const dt = now - lastFrameTime;
   lastFrameTime = now;
 
   if (!gameOver && hasStarted) {
     const rect = canvas.getBoundingClientRect();
-    
-    // Smooth keyboard movement
-    let vx = 0;
-    if (keys.left) vx = -player.maxSpeed;
-    if (keys.right) vx = player.maxSpeed;
-    player.x += vx * (dt / 16.67); // Normalize to 60fps
-    player.x = Math.max(0, Math.min(player.x, rect.width - player.width));
-    
-    // Keep touch controls working
+
     if (player.targetX != null) {
       const dx = player.targetX - player.x;
       const distance = Math.abs(dx);
+
       if (distance < 1) {
         player.x = player.targetX;
         player.targetX = null;
@@ -363,9 +384,10 @@ function update() {
         const direction = dx > 0 ? 1 : -1;
         const speed = Math.min(player.maxSpeed, distance * 0.2);
         player.x += direction * speed;
-        player.x = Math.max(0, Math.min(player.x, rect.width - player.width));
       }
     }
+
+    player.x = Math.max(0, Math.min(player.x, rect.width - player.width));
 
     updateObjects(dt);
     updateParticles(dt);
@@ -381,12 +403,19 @@ function update() {
   } else {
     updateParticles(dt);
   }
+
+  if (shakeTime > 0) {
+    shakeTime -= dt;
+    if (shakeTime < 0) shakeTime = 0;
+  }
 }
 
 function drawBackground(rect) {
   ctx.clearRect(0, 0, rect.width, rect.height);
+
   ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
   ctx.fillRect(0, 0, rect.width, rect.height);
+
   const groundHeight = rect.height * groundFraction;
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, rect.height - groundHeight, rect.width, groundHeight);
@@ -406,6 +435,7 @@ function drawObjects() {
     let img = null;
     if (obj.type === 'gift') img = images.gift;
     else if (obj.type === 'charcoal') img = images.charcoal;
+
     if (img && assetsLoaded) {
       ctx.drawImage(img, obj.x, obj.y, obj.width, obj.height);
     } else {
@@ -439,6 +469,7 @@ function drawUI(rect) {
   if (!hasStarted && !gameOver) {
     ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
     ctx.fillRect(0, 0, rect.width, rect.height);
+
     ctx.fillStyle = '#ffffff';
     ctx.textAlign = 'center';
     ctx.font = 'bold 28px system-ui';
@@ -451,6 +482,7 @@ function drawUI(rect) {
   if (gameOver) {
     ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
     ctx.fillRect(0, 0, rect.width, rect.height);
+
     ctx.fillStyle = '#ffffff';
     ctx.textAlign = 'center';
     ctx.font = 'bold 32px system-ui';
@@ -473,13 +505,25 @@ function drawUI(rect) {
 
 function draw() {
   const rect = canvas.getBoundingClientRect();
+
   update();
+
+  ctx.save();
+  if (shakeTime > 0 && shakeIntensity > 0) {
+    const shakeAmount = (shakeTime / 200) * shakeIntensity;
+    const offsetX = (Math.random() - 0.5) * shakeAmount;
+    const offsetY = (Math.random() - 0.5) * shakeAmount;
+    ctx.translate(offsetX, offsetY);
+  }
+
   drawBackground(rect);
   drawObjects();
   drawPlayer();
   drawParticles();
   drawUI(rect);
+
   ctx.restore();
+
   requestAnimationFrame(draw);
 }
 
