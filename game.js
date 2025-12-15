@@ -179,14 +179,20 @@ canvas.addEventListener('touchstart', (e) => {
   handleTouch(e);
 }, { passive: false });
 
-canvas.addEventListener('touchmove', (e) => {
-  handleTouch(e);
-}, { passive: false });
-
-canvas.addEventListener('touchend', (e) => {
+canvas.addEventListener('touchmove', handleTouch);
+canvas.addEventListener('touchend', () => {
   player.targetX = null;
-}, { passive: false });
+});
 
+function handleTouch(e) {
+  if (gameOver) return;
+  if (!e.touches || e.touches.length === 0) return;
+  const touch = e.touches[0];
+  const rect = canvas.getBoundingClientRect();
+  const touchX = touch.clientX - rect.left;
+  player.targetX = touchX - player.width / 2;
+  e.preventDefault();
+}
 
 // --- Falling objects ---
 const objects = [];
@@ -291,8 +297,8 @@ function updateObjects(dt) {
 
 // hitboxes
 function rectsOverlap(a, b) {
-  const shrinkA = 0.1;
-  const shrinkB = 0.1;
+  const shrinkA = 0.2;
+  const shrinkB = 0.2;
   const ax = a.x + a.width * shrinkA / 2;
   const ay = a.y + a.height * shrinkA / 2;
   const aw = a.width * (1 - shrinkA);
