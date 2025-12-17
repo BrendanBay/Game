@@ -118,8 +118,11 @@ function loadImages() {
     }
   }
   santaImg.onload = onLoad;
+  santaImg.onerror = () => console.log('Failed to load santa.png'); // iOS safe
   giftImg.onload = onLoad;
+  giftImg.onerror = () => console.log('Failed to load gift.png');
   charcoalImg.onload = onLoad;
+  charcoalImg.onerror = () => console.log('Failed to load charcoal.png');
   santaImg.src = 'santa.png';
   giftImg.src = 'gift.png';
   charcoalImg.src = 'charcoal.png';
@@ -132,8 +135,18 @@ function loadImages() {
 const groundFraction = 0.2;
 function resizeCanvas() {
   const rect = canvas.getBoundingClientRect();
-  // iOS-specific DPR reduction for performance
-  const dpr = /iPad|iPhone|iPod/.test(navigator.userAgent) ? 1 : Math.min(window.devicePixelRatio || 1, 2);
+  // FIXED: Safe iOS DPR detection
+  let dpr = 1;
+  try {
+    const ua = navigator.userAgent.toLowerCase();
+    if (ua.includes('iphone') || ua.includes('ipad') || ua.includes('ipod')) {
+      dpr = 1; // Force DPR=1 on iOS
+    } else {
+      dpr = Math.min(window.devicePixelRatio || 1, 2);
+    }
+  } catch (e) {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+  }
   const maxDimension = 3840;
   const scale = Math.min(1, maxDimension / Math.max(rect.width, rect.height));
   canvas.width = rect.width * dpr * scale;
@@ -346,8 +359,8 @@ function update() {
   if (!assetsLoaded) return;
   const now = performance.now();
   let dt = now - lastFrameTime;
-  // PERFORMANCE: Extreme RAF skip protection
-  if (dt > 33) return;
+  // FIXED: RAF protection - only skip extreme drops (>100ms)
+  if (dt > 100) return;
   // clamp dt to smooth out iOS Safari frame skips
   dt = Math.min(50, dt);
   lastFrameTime = now;
@@ -529,4 +542,3 @@ canvas.addEventListener('touchstart', (e) => {
 loadImages();
 resizeCanvas();
 requestAnimationFrame(draw);
-
