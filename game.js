@@ -111,22 +111,18 @@ function loadImages() {
   const charcoalImg = new Image();
   let loadedCount = 0;
   const total = 3;
-
   function onLoad() {
     loadedCount++;
     if (loadedCount === total) {
       assetsLoaded = true;
     }
   }
-
   santaImg.onload = onLoad;
   giftImg.onload = onLoad;
   charcoalImg.onload = onLoad;
-
   santaImg.src = 'santa.png';
   giftImg.src = 'gift.png';
   charcoalImg.src = 'charcoal.png';
-
   images.santa = santaImg;
   images.gift = giftImg;
   images.charcoal = charcoalImg;
@@ -134,17 +130,15 @@ function loadImages() {
 
 // --- Resize & layout (iOS-optimized) ---
 const groundFraction = 0.2;
-
 function resizeCanvas() {
   const rect = canvas.getBoundingClientRect();
-  const dpr = Math.min(window.devicePixelRatio || 1, 2); // cap DPR at 2
+  // iOS-specific DPR reduction for performance
+  const dpr = /iPad|iPhone|iPod/.test(navigator.userAgent) ? 1 : Math.min(window.devicePixelRatio || 1, 2);
   const maxDimension = 3840;
   const scale = Math.min(1, maxDimension / Math.max(rect.width, rect.height));
-
   canvas.width = rect.width * dpr * scale;
   canvas.height = rect.height * dpr * scale;
   ctx.setTransform(dpr * scale, 0, 0, dpr * scale, 0, 0);
-
   updateLayout(rect.width, rect.height);
 }
 
@@ -162,7 +156,6 @@ window.addEventListener('resize', resizeCanvas);
 let score = 0;
 let lives = 3;
 let gameOver = false;
-
 // difficulty / spawn
 const baseSpawnInterval = 900;
 const minSpawnInterval = 250;
@@ -182,19 +175,16 @@ const player = {
 
 // --- Smooth Keyboard Controls ---
 let keys = { left: false, right: false };
-
 window.addEventListener('keydown', (e) => {
   if (!hasStarted && (e.key === 'Enter' || e.key === ' ')) {
     e.preventDefault();
     startGameFromInput();
     return;
   }
-
   if (gameOver && e.key === 'Enter') {
     restartGame();
     return;
   }
-
   if (['ArrowLeft', 'a'].includes(e.key)) {
     keys.left = true;
     e.preventDefault();
@@ -203,7 +193,6 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault();
   }
 });
-
 window.addEventListener('keyup', (e) => {
   if (['ArrowLeft', 'a'].includes(e.key)) {
     keys.left = false;
@@ -221,7 +210,6 @@ canvas.addEventListener('touchstart', (e) => {
   if (gameOver) return;
   handleTouch(e);
 }, { passive: false });
-
 canvas.addEventListener('touchmove', handleTouch);
 canvas.addEventListener('touchend', () => {
   player.targetX = null;
@@ -230,19 +218,20 @@ canvas.addEventListener('touchend', () => {
 function handleTouch(e) {
   if (gameOver) return;
   if (!e.touches || e.touches.length === 0) return;
-
   const touch = e.touches[0];
   const rect = canvas.getBoundingClientRect();
   const touchX = touch.clientX - rect.left;
-
   player.targetX = touchX - player.width / 2;
   e.preventDefault();
 }
 
 // --- Falling objects ---
 const objects = [];
+const MAX_OBJECTS = 20; // PERFORMANCE: Cap object count
 
 function spawnObject() {
+  // PERFORMANCE: Prevent object explosion
+  if (objects.length >= MAX_OBJECTS) return;
   const rect = canvas.getBoundingClientRect();
   const size = 56;
   const x = Math.random() * (rect.width - size);
@@ -259,10 +248,9 @@ function getCurrentSpawnInterval() {
   return baseSpawnInterval - t * (baseSpawnInterval - minSpawnInterval);
 }
 
-// --- Objects update ---
+// --- Objects update (OPTIMIZED) ---
 function updateObjects(dt) {
   if (gameOver || !hasStarted) return;
-
   const now = performance.now();
   const currentInterval = getCurrentSpawnInterval();
   if (now - lastSpawnTime > currentInterval) {
@@ -273,16 +261,22 @@ function updateObjects(dt) {
   const rect = canvas.getBoundingClientRect();
   for (let i = objects.length - 1; i >= 0; i--) {
     const obj = objects[i];
-
     // apply dt normalization to falling speed
     obj.y += obj.speed * (dt / 16.67);
+
+    // PERFORMANCE: Early exit for off-screen objects
+    if (obj.y > rect.height + 50 || obj.y < -100) {
+      objects.splice(i, 1);
+      continue;
+    }
 
     if (obj.y > rect.height) {
       objects.splice(i, 1);
       continue;
     }
 
-    if (rectsOverlap(player, obj)) {
+    // PERFORMANCE: Only check collision when object is near player Y
+    if (Math.abs(obj.y - player.y) < 150 && rectsOverlap(player, obj)) {
       if (obj.type === 'gift') {
         score += 1;
         if (!goodJobShown && score >= GOOD_JOB_SCORE) {
@@ -312,17 +306,14 @@ function updateObjects(dt) {
 function rectsOverlap(a, b) {
   const shrinkA = 0.2;
   const shrinkB = 0.2;
-
   const ax = a.x + a.width * shrinkA / 2;
   const ay = a.y + a.height * shrinkA / 2;
   const aw = a.width * (1 - shrinkA);
   const ah = a.height * (1 - shrinkA);
-
   const bx = b.x + b.width * shrinkB / 2;
   const by = b.y + b.height * shrinkB / 2;
   const bw = b.width * (1 - shrinkB);
   const bh = b.height * (1 - shrinkB);
-
   return (
     ax < bx + bw &&
     ax + aw > bx &&
@@ -333,22 +324,17 @@ function rectsOverlap(a, b) {
 
 function restartGame() {
   stopSound('gameover');
-
   if (score > bestScore) {
     bestScore = score;
     saveBestScore();
   }
-
   score = 0;
   lives = 3;
   gameOver = false;
-
   objects.length = 0;
   player.targetX = null;
-
   lastSpawnTime = 0;
   difficultyStartTime = performance.now();
-
   hasStarted = false;
   goodJobShown = false;
   lastHitTime = -Infinity;
@@ -356,24 +342,22 @@ function restartGame() {
 
 // --- Update & draw ---
 let lastFrameTime = performance.now();
-
 function update() {
   if (!assetsLoaded) return;
-
   const now = performance.now();
   let dt = now - lastFrameTime;
+  // PERFORMANCE: Extreme RAF skip protection
+  if (dt > 33) return;
   // clamp dt to smooth out iOS Safari frame skips
   dt = Math.min(50, dt);
   lastFrameTime = now;
 
   if (!gameOver && hasStarted) {
     const rect = canvas.getBoundingClientRect();
-
     // Smooth keyboard movement
     let vx = 0;
     if (keys.left) vx = -player.maxSpeed;
     if (keys.right) vx = player.maxSpeed;
-
     player.x += vx * (dt / 16.67); // Normalize to 60fps
     player.x = Math.max(0, Math.min(player.x, rect.width - player.width));
 
@@ -418,7 +402,6 @@ function drawBackground(rect) {
   ctx.clearRect(0, 0, rect.width, rect.height);
   ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
   ctx.fillRect(0, 0, rect.width, rect.height);
-
   const groundHeight = rect.height * groundFraction;
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, rect.height - groundHeight, rect.width, groundHeight);
@@ -428,7 +411,6 @@ function drawPlayer() {
   const now = performance.now();
   const timeSinceHit = now - lastHitTime;
   const isInvulnerable = timeSinceHit < INVULN_DURATION;
-
   // Golden glow while invulnerable
   if (isInvulnerable) {
     ctx.save();
@@ -453,7 +435,6 @@ function drawObjects() {
     let img = null;
     if (obj.type === 'gift') img = images.gift;
     else if (obj.type === 'charcoal') img = images.charcoal;
-
     if (img && assetsLoaded) {
       ctx.drawImage(img, obj.x, obj.y, obj.width, obj.height);
     } else {
@@ -537,7 +518,6 @@ canvas.addEventListener('click', () => {
     restartGame();
   }
 });
-
 canvas.addEventListener('touchstart', (e) => {
   if (gameOver) {
     e.preventDefault();
@@ -549,3 +529,4 @@ canvas.addEventListener('touchstart', (e) => {
 loadImages();
 resizeCanvas();
 requestAnimationFrame(draw);
+
