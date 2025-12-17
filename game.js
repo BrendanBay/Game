@@ -1,5 +1,4 @@
 const canvas = document.getElementById('gameCanvas');
-
 const ctx = canvas.getContext('2d');
 
 // --- Images ---
@@ -8,7 +7,6 @@ const images = {
   gift: null,
   charcoal: null
 };
-
 let assetsLoaded = false;
 
 // --- Sounds ---
@@ -17,14 +15,12 @@ const sounds = {
   hit: new Audio('hit.mp3'),
   gameover: new Audio('gameover.mp3')
 };
-
 let audioUnlocked = false;
 let hasStarted = false;
 
 // --- Best score (localStorage) ---
 let bestScore = 0;
 const BEST_SCORE_KEY = 'catch_the_gifts_best_score';
-
 const stored = localStorage.getItem(BEST_SCORE_KEY);
 if (stored !== null) {
   const n = Number(stored);
@@ -39,11 +35,35 @@ function saveBestScore() {
 let goodJobShown = false;
 const GOOD_JOB_SCORE = 100;
 
+// --- Damage / invulnerability ---
+let lastHitTime = -Infinity;
+const INVULN_DURATION = 1000; // 1 second in ms
+
+// --- UI state buffer to avoid jitter ---
+let uiData = {
+  score: 0,
+  lives: 3,
+  bestScore: 0,
+  gameOver: false,
+  hasStarted: false,
+  goodJobShown: false
+};
+
+// --- iOS touch visibility nudge (harmless elsewhere) ---
+window.addEventListener('touchstart', () => {
+  // No-op on most browsers; exists to encourage iOS to resume full RAF rate
+  if (typeof document.webkitVisibilityState !== 'undefined') {
+    // eslint-disable-next-line no-unused-expressions
+    document.webkitVisibilityState;
+  }
+}, { once: true, passive: true });
+
 // unlock audio on first explicit start action
 function unlockAudio() {
   if (audioUnlocked) return;
   audioUnlocked = true;
   Object.values(sounds).forEach(audio => {
+    audio.preload = 'auto';
     audio.play().then(() => {
       audio.pause();
       audio.currentTime = 0;
@@ -55,6 +75,7 @@ function playSound(name, volume = 1) {
   if (!audioUnlocked || !hasStarted) return;
   const s = sounds[name];
   if (!s) return;
+  s.muted = false;
   s.pause();
   s.currentTime = 0;
   s.volume = volume;
@@ -66,6 +87,14 @@ function stopSound(name) {
   if (!s) return;
   s.pause();
   s.currentTime = 0;
+}
+
+// Stop all sounds so only one plays at a time
+function stopAllSounds() {
+  Object.values(sounds).forEach(audio => {
+    audio.pause();
+    audio.currentTime = 0;
+  });
 }
 
 function startGameFromInput() {
@@ -103,15 +132,19 @@ function loadImages() {
   images.charcoal = charcoalImg;
 }
 
-// --- Resize & layout ---
+// --- Resize & layout (iOS-optimized) ---
 const groundFraction = 0.2;
 
 function resizeCanvas() {
   const rect = canvas.getBoundingClientRect();
-  const dpr = window.devicePixelRatio || 1;
-  canvas.width = rect.width * dpr;
-  canvas.height = rect.height * dpr;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const dpr = Math.min(window.devicePixelRatio || 1, 2); // cap DPR at 2
+  const maxDimension = 3840;
+  const scale = Math.min(1, maxDimension / Math.max(rect.width, rect.height));
+
+  canvas.width = rect.width * dpr * scale;
+  canvas.height = rect.height * dpr * scale;
+  ctx.setTransform(dpr * scale, 0, 0, dpr * scale, 0, 0);
+
   updateLayout(rect.width, rect.height);
 }
 
@@ -197,9 +230,11 @@ canvas.addEventListener('touchend', () => {
 function handleTouch(e) {
   if (gameOver) return;
   if (!e.touches || e.touches.length === 0) return;
+
   const touch = e.touches[0];
   const rect = canvas.getBoundingClientRect();
   const touchX = touch.clientX - rect.left;
+
   player.targetX = touchX - player.width / 2;
   e.preventDefault();
 }
@@ -238,7 +273,9 @@ function updateObjects(dt) {
   const rect = canvas.getBoundingClientRect();
   for (let i = objects.length - 1; i >= 0; i--) {
     const obj = objects[i];
-    obj.y += obj.speed;
+
+    // apply dt normalization to falling speed
+    obj.y += obj.speed * (dt / 16.67);
 
     if (obj.y > rect.height) {
       objects.splice(i, 1);
@@ -246,20 +283,27 @@ function updateObjects(dt) {
     }
 
     if (rectsOverlap(player, obj)) {
-      const centerX = obj.x + obj.width / 2;
-      const centerY = obj.y + obj.height / 2;
-
       if (obj.type === 'gift') {
         score += 1;
         if (!goodJobShown && score >= GOOD_JOB_SCORE) {
           goodJobShown = true;
         }
+        stopAllSounds();
         playSound('catch', 0.7);
+        objects.splice(i, 1);
       } else {
-        lives -= 1;
-        playSound('hit', 0.9);
+        // coal hit – only if not invulnerable
+        const nowHit = performance.now();
+        const timeSinceHit = nowHit - lastHitTime;
+        if (timeSinceHit >= INVULN_DURATION) {
+          lives -= 1;
+          lastHitTime = nowHit;
+          stopAllSounds();
+          playSound('hit', 0.9);
+        }
+        // coal always disappears on contact
+        objects.splice(i, 1);
       }
-      objects.splice(i, 1);
     }
   }
 }
@@ -268,10 +312,12 @@ function updateObjects(dt) {
 function rectsOverlap(a, b) {
   const shrinkA = 0.2;
   const shrinkB = 0.2;
+
   const ax = a.x + a.width * shrinkA / 2;
   const ay = a.y + a.height * shrinkA / 2;
   const aw = a.width * (1 - shrinkA);
   const ah = a.height * (1 - shrinkA);
+
   const bx = b.x + b.width * shrinkB / 2;
   const by = b.y + b.height * shrinkB / 2;
   const bw = b.width * (1 - shrinkB);
@@ -287,6 +333,7 @@ function rectsOverlap(a, b) {
 
 function restartGame() {
   stopSound('gameover');
+
   if (score > bestScore) {
     bestScore = score;
     saveBestScore();
@@ -295,12 +342,16 @@ function restartGame() {
   score = 0;
   lives = 3;
   gameOver = false;
+
   objects.length = 0;
   player.targetX = null;
+
   lastSpawnTime = 0;
   difficultyStartTime = performance.now();
+
   hasStarted = false;
   goodJobShown = false;
+  lastHitTime = -Infinity;
 }
 
 // --- Update & draw ---
@@ -310,7 +361,9 @@ function update() {
   if (!assetsLoaded) return;
 
   const now = performance.now();
-  const dt = now - lastFrameTime;
+  let dt = now - lastFrameTime;
+  // clamp dt to smooth out iOS Safari frame skips
+  dt = Math.min(50, dt);
   lastFrameTime = now;
 
   if (!gameOver && hasStarted) {
@@ -320,6 +373,7 @@ function update() {
     let vx = 0;
     if (keys.left) vx = -player.maxSpeed;
     if (keys.right) vx = player.maxSpeed;
+
     player.x += vx * (dt / 16.67); // Normalize to 60fps
     player.x = Math.max(0, Math.min(player.x, rect.width - player.width));
 
@@ -346,21 +400,46 @@ function update() {
         bestScore = score;
         saveBestScore();
       }
+      stopAllSounds();
       playSound('gameover', 0.9);
     }
   }
+
+  // Update UI buffer every frame so it stays in sync but renders smoothly
+  uiData.score = score;
+  uiData.lives = lives;
+  uiData.bestScore = bestScore;
+  uiData.gameOver = gameOver;
+  uiData.hasStarted = hasStarted;
+  uiData.goodJobShown = goodJobShown;
 }
 
 function drawBackground(rect) {
   ctx.clearRect(0, 0, rect.width, rect.height);
   ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
   ctx.fillRect(0, 0, rect.width, rect.height);
+
   const groundHeight = rect.height * groundFraction;
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, rect.height - groundHeight, rect.width, groundHeight);
 }
 
 function drawPlayer() {
+  const now = performance.now();
+  const timeSinceHit = now - lastHitTime;
+  const isInvulnerable = timeSinceHit < INVULN_DURATION;
+
+  // Golden glow while invulnerable
+  if (isInvulnerable) {
+    ctx.save();
+    ctx.lineWidth = 6;
+    ctx.strokeStyle = '#ffd700'; // gold
+    ctx.shadowColor = '#ffd700';
+    ctx.shadowBlur = 15;
+    ctx.strokeRect(player.x - 4, player.y - 4, player.width + 8, player.height + 8);
+    ctx.restore();
+  }
+
   if (images.santa && assetsLoaded) {
     ctx.drawImage(images.santa, player.x, player.y, player.width, player.height);
   } else {
@@ -388,12 +467,12 @@ function drawUI(rect) {
   ctx.fillStyle = '#ffffff';
   ctx.font = 'bold 20px system-ui';
   ctx.textAlign = 'left';
-  ctx.fillText(`Score: ${score}`, 10, 24);
-  ctx.fillText(`Best: ${bestScore}`, 10, 48);
-  ctx.fillText(`Lives: ${lives}`, 10, 72);
+  ctx.fillText(`Score: ${uiData.score}`, 10, 24);
+  ctx.fillText(`Best: ${uiData.bestScore}`, 10, 48);
+  ctx.fillText(`Lives: ${uiData.lives}`, 10, 72);
 
   // Good job banner
-  if (goodJobShown) {
+  if (uiData.goodJobShown) {
     ctx.save();
     ctx.textAlign = 'center';
     ctx.font = 'bold 28px system-ui';
@@ -405,7 +484,7 @@ function drawUI(rect) {
     ctx.restore();
   }
 
-  if (!hasStarted && !gameOver) {
+  if (!uiData.hasStarted && !uiData.gameOver) {
     ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
     ctx.fillRect(0, 0, rect.width, rect.height);
     ctx.fillStyle = '#ffffff';
@@ -417,7 +496,7 @@ function drawUI(rect) {
     ctx.textAlign = 'left';
   }
 
-  if (gameOver) {
+  if (uiData.gameOver) {
     ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
     ctx.fillRect(0, 0, rect.width, rect.height);
     ctx.fillStyle = '#ffffff';
@@ -425,8 +504,8 @@ function drawUI(rect) {
     ctx.font = 'bold 32px system-ui';
     ctx.fillText('Game Over!', rect.width / 2, rect.height / 2 - 30);
     ctx.font = 'bold 20px system-ui';
-    ctx.fillText(`Score: ${score}`, rect.width / 2, rect.height / 2 + 5);
-    ctx.fillText(`Best: ${bestScore}`, rect.width / 2, rect.height / 2 + 30);
+    ctx.fillText(`Score: ${uiData.score}`, rect.width / 2, rect.height / 2 + 5);
+    ctx.fillText(`Best: ${uiData.bestScore}`, rect.width / 2, rect.height / 2 + 30);
     ctx.fillText('Tap or Enter to Restart', rect.width / 2, rect.height / 2 + 60);
     ctx.textAlign = 'left';
   }
@@ -447,7 +526,6 @@ function draw() {
   drawObjects();
   drawPlayer();
   drawUI(rect);
-  ctx.restore();
   requestAnimationFrame(draw);
 }
 
